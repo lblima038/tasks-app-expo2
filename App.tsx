@@ -1,22 +1,49 @@
 import { useEffect, useState } from 'react';
-import { StyleSheet, Text, View, TextInput, TouchableOpacity, SafeAreaView, Platform, StatusBar as RNStatusBar, Image, Pressable, ActivityIndicator, Modal, Button } from 'react-native';
+import {
+  StyleSheet,
+  Text,
+  View,
+  TextInput,
+  TouchableOpacity,
+  SafeAreaView,
+  Platform,
+  StatusBar as RNStatusBar,
+  Image,
+  Pressable,
+  ActivityIndicator,
+  Modal,
+  Button,
+} from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { StatusBar } from 'expo-status-bar';
 import Checkbox from 'expo-checkbox';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import TaskList from './src/components/TaskList';
-import { addTask, deleteTask, getAllTasks, updateTask, TaskItem } from './src/utils/handle-api';
+import LoginScreen from './src/components/LoginScreen';
+import SignupScreen from './src/components/SignupScreen';
+import {
+  addTask,
+  deleteTask,
+  getAllTasks,
+  updateTask,
+  setAuthToken,
+  signup,
+  login,
+  TaskItem,
+  setUnauthorizedCallback,
+} from './src/utils/handle-api';
 import { globalStyles } from './src/styles/global';
 import AboutScreen from './src/components/AboutScreen';
 
-// TODO (Zustand): Importe o seu useTaskStore aqui
+const STORAGE_TOKEN = 'sessionToken';
+const STORAGE_EMAIL = 'userEmail';
 
 export default function App() {
-  // TODO (Zustand): Remova este useState e utilize o seletor da sua store para pegar as tasks
   const [tasks, setTasks] = useState<TaskItem[]>([]);
-  const [text, setText] = useState("");
+  const [text, setText] = useState('');
   const [isUpdating, setIsUpdating] = useState(false);
-  const [taskId, setTaskId] = useState("");
-  const [loading, setLoading] = useState(true);
+  const [taskId, setTaskId] = useState('');
+  const [taskLoading, setTaskLoading] = useState(true);
   const [logoError, setLogoError] = useState(false);
   const [filter, setFilter] = useState<'all' | 'completed' | 'pending'>('all');
 
@@ -27,18 +54,47 @@ export default function App() {
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [priority, setPriority] = useState<'Baixa' | 'Média' | 'Alta'>('Baixa');
 
+  const [sessionToken, setSessionTokenState] = useState<string | null>(null);
+  const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [isSessionLoading, setIsSessionLoading] = useState(true);
+  const [authLoading, setAuthLoading] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [screen, setScreen] = useState<'login' | 'signup' | 'tasks'>('login');
+
   useEffect(() => {
-    // TODO (Zustand): Atualize esta chamada para usar a action correspondente da store
-    getAllTasks(setTasks, setLoading);
+    const loadSession = async () => {
+      try {
+        const token = await AsyncStorage.getItem(STORAGE_TOKEN);
+        const email = await AsyncStorage.getItem(STORAGE_EMAIL);
+        if (token) {
+          setSessionTokenState(token);
+          setAuthToken(token);
+          setUserEmail(email);
+          setScreen('tasks');
+        }
+      } catch (error) {
+        console.log('Erro ao carregar sessão:', error);
+      } finally {
+        setIsSessionLoading(false);
+      }
+    };
+
+    loadSession();
   }, []);
 
+  useEffect(() => {
+    if (screen === 'tasks' && sessionToken) {
+      getAllTasks(setTasks, setTaskLoading);
+    }
+  }, [screen, sessionToken]);
+
   const resetForm = () => {
-    setText("");
+    setText('');
     setCompleted(false);
     setDueDate(null);
     setPriority('Baixa');
     setIsUpdating(false);
-    setTaskId("");
+    setTaskId('');
     setModalVisible(false);
   };
 
@@ -54,18 +110,119 @@ export default function App() {
   const handleSave = () => {
     const formattedDate = dueDate ? dueDate.toISOString() : null;
     if (isUpdating) {
-      // TODO (Zustand): Substitua a chamada abaixo pela action de atualizar da sua store
       updateTask(taskId, text, completed, formattedDate, setTasks, resetForm);
     } else {
-      // TODO (Zustand): Substitua a chamada abaixo pela action de adicionar da sua store
       addTask(text, completed, formattedDate, setTasks, resetForm);
     }
   };
 
-  const onChangeDate = (event: any, selectedDate?: Date) => {
-    setShowDatePicker(false);
-    if (selectedDate) setDueDate(selectedDate);
+  const handleLogout = async () => {
+    try {
+      await AsyncStorage.multiRemove([STORAGE_TOKEN, STORAGE_EMAIL]);
+    } catch (error) {
+      console.log('Erro ao limpar sessão:', error);
+    }
+    setSessionTokenState(null);
+    setUserEmail(null);
+    setAuthToken(null);
+    setTasks([]);
+    setScreen('login');
   };
+
+  useEffect(() => {
+    setUnauthorizedCallback(handleLogout);
+  }, []);
+
+  const handleLogin = async (email: string, password: string) => {
+    setAuthError(null);
+    setAuthLoading(true);
+
+    try {
+      const response = await login(email, password);
+      const { token, user } = response.data;
+
+      setSessionTokenState(token);
+      setUserEmail(user.email);
+      setAuthToken(token);
+      await AsyncStorage.setItem(STORAGE_TOKEN, token);
+      await AsyncStorage.setItem(STORAGE_EMAIL, user.email);
+      setScreen('tasks');
+      setTaskLoading(true);
+      getAllTasks(setTasks, setTaskLoading);
+    } catch (error: any) {
+      const message =
+        error?.response?.data?.error ||
+        error?.message ||
+        'Erro ao autenticar. Verifique suas credenciais.';
+      setAuthError(message);
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handleSignup = async (email: string, password: string) => {
+    setAuthError(null);
+    setAuthLoading(true);
+
+    try {
+      const response = await signup(email, password);
+      const { token, user } = response.data;
+
+      setSessionTokenState(token);
+      setUserEmail(user.email);
+      setAuthToken(token);
+      await AsyncStorage.setItem(STORAGE_TOKEN, token);
+      await AsyncStorage.setItem(STORAGE_EMAIL, user.email);
+      setScreen('tasks');
+      setTaskLoading(true);
+      getAllTasks(setTasks, setTaskLoading);
+    } catch (error: any) {
+      const message =
+        error?.response?.data?.error ||
+        error?.message ||
+        'Erro ao criar conta. Tente novamente.';
+      setAuthError(message);
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const renderAuthScreen = () => {
+    if (screen === 'signup') {
+      return (
+        <SignupScreen
+          onSignup={handleSignup}
+          onSwitchScreen={() => setScreen('login')}
+          loading={authLoading}
+          error={authError ?? undefined}
+        />
+      );
+    }
+
+    return (
+      <LoginScreen
+        onLogin={handleLogin}
+        onSwitchScreen={() => setScreen('signup')}
+        loading={authLoading}
+        error={authError ?? undefined}
+      />
+    );
+  };
+
+  if (isSessionLoading) {
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        <View style={styles.centeredContainer}>
+          <ActivityIndicator size="large" color="#000" />
+          <Text style={styles.loadingText}>Carregando sessão...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (!sessionToken) {
+    return renderAuthScreen();
+  }
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -74,13 +231,23 @@ export default function App() {
           {logoError ? (
             <Text style={styles.header}>Gerenciador de Tarefas</Text>
           ) : (
-            <Image 
-              source={require('./assets/task-app-banner.png')} 
-              style={styles.logo} 
+            <Image
+              source={require('./assets/task-app-banner.png')}
+              style={styles.logo}
               onError={() => setLogoError(true)}
             />
           )}
           {!logoError && <Text style={styles.header}>Tarefas</Text>}
+        </View>
+
+        <View style={styles.sessionContainer}>
+          <View>
+            <Text style={styles.welcomeText}>Olá, {userEmail ?? 'usuário'}!</Text>
+            <Text style={styles.sessionSubtitle}>Acesse suas tarefas protegidas.</Text>
+          </View>
+          <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
+            <Text style={styles.logoutText}>Logout</Text>
+          </TouchableOpacity>
         </View>
 
         <View style={styles.counterContainer}>
@@ -88,20 +255,20 @@ export default function App() {
         </View>
 
         <View style={styles.filterContainer}>
-          <TouchableOpacity 
-            style={[styles.filterButton, filter === 'all' ? styles.filterButtonActive : styles.filterButtonInactive]} 
+          <TouchableOpacity
+            style={[styles.filterButton, filter === 'all' ? styles.filterButtonActive : styles.filterButtonInactive]}
             onPress={() => setFilter('all')}
           >
             <Text style={filter === 'all' ? styles.filterTextActive : styles.filterTextInactive}>Todas</Text>
           </TouchableOpacity>
-          <TouchableOpacity 
-            style={[styles.filterButton, filter === 'completed' ? styles.filterButtonActive : styles.filterButtonInactive]} 
+          <TouchableOpacity
+            style={[styles.filterButton, filter === 'completed' ? styles.filterButtonActive : styles.filterButtonInactive]}
             onPress={() => setFilter('completed')}
           >
             <Text style={filter === 'completed' ? styles.filterTextActive : styles.filterTextInactive}>Concluídas</Text>
           </TouchableOpacity>
-          <TouchableOpacity 
-            style={[styles.filterButton, filter === 'pending' ? styles.filterButtonActive : styles.filterButtonInactive]} 
+          <TouchableOpacity
+            style={[styles.filterButton, filter === 'pending' ? styles.filterButtonActive : styles.filterButtonInactive]}
             onPress={() => setFilter('pending')}
           >
             <Text style={filter === 'pending' ? styles.filterTextActive : styles.filterTextInactive}>Pendentes</Text>
@@ -109,25 +276,24 @@ export default function App() {
         </View>
 
         <View style={styles.actionButtonsContainer}>
-          <Pressable 
+          <Pressable
             style={({ pressed }) => [
               styles.actionButton,
               styles.actionButtonAdd,
-              pressed && styles.actionButtonAddPressed
+              pressed && styles.actionButtonAddPressed,
             ]}
             onPress={() => setModalVisible(true)}
           >
             <Text style={styles.actionButtonText}>Nova Tarefa</Text>
           </Pressable>
 
-          <Pressable 
+          <Pressable
             style={({ pressed }) => [
               styles.actionButton,
               styles.deleteButton,
-              pressed && styles.deleteButtonPressed
+              pressed && styles.deleteButtonPressed,
             ]}
-            // TODO (Zustand): Chame a action de deletar todas as tarefas da sua store
-            onPress={() => setTasks([])} 
+            onPress={() => setTasks([])}
           >
             <Text style={styles.actionButtonText}>Excluir todas</Text>
           </Pressable>
@@ -137,34 +303,28 @@ export default function App() {
           <Button title="Sobre o App" onPress={() => setAboutModalVisible(true)} />
         </View>
 
-        {/* TODO (Zustand): Remova as props tasks, onUpdate e onDelete após refatorar o TaskList */}
-        <TaskList 
-          tasks={tasks.filter(t => {
+        <TaskList
+          tasks={tasks.filter((t) => {
             if (filter === 'completed') return t.completed;
             if (filter === 'pending') return !t.completed;
             return true;
-          })} 
-          onUpdate={updateMode} 
-          onDelete={(id) => deleteTask(id, setTasks)} 
+          })}
+          onUpdate={updateMode}
+          onDelete={(id) => deleteTask(id, setTasks)}
         />
 
-        {loading && (
+        {taskLoading && (
           <View style={styles.loaderContainer}>
             <ActivityIndicator size="large" color="#000" />
           </View>
         )}
       </View>
 
-      <Modal
-        visible={modalVisible}
-        transparent={true}
-        animationType="fade"
-        onRequestClose={resetForm}
-      >
+      <Modal visible={modalVisible} transparent animationType="fade" onRequestClose={resetForm}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>{isUpdating ? "Editar Tarefa" : "Nova Tarefa"}</Text>
-            
+            <Text style={styles.modalTitle}>{isUpdating ? 'Editar Tarefa' : 'Nova Tarefa'}</Text>
+
             <TextInput
               style={styles.modalInput}
               placeholder="Nome da tarefa..."
@@ -177,14 +337,14 @@ export default function App() {
               <Text style={styles.fieldLabel}>Data limite:</Text>
               {Platform.OS === 'web' ? (
                 // @ts-ignore
-                <input 
+                <input
                   type="date"
                   value={dueDate ? dueDate.toISOString().split('T')[0] : ''}
                   onChange={(e: any) => {
                     const val = e.target.value;
                     if (val) {
                       const parts = val.split('-');
-                      setDueDate(new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2])));
+                      setDueDate(new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10)));
                     } else {
                       setDueDate(null);
                     }
@@ -194,15 +354,13 @@ export default function App() {
               ) : (
                 <View style={{ flex: 1, marginLeft: 16, alignItems: 'flex-start' }}>
                   <TouchableOpacity onPress={() => setShowDatePicker(true)} style={styles.datePickerBtn}>
-                    <Text>{dueDate ? dueDate.toLocaleDateString() : "Selecionar Data"}</Text>
+                    <Text>{dueDate ? dueDate.toLocaleDateString() : 'Selecionar Data'}</Text>
                   </TouchableOpacity>
                   {showDatePicker && (
-                    <DateTimePicker
-                      value={dueDate || new Date()}
-                      mode="date"
-                      display="default"
-                      onChange={onChangeDate}
-                    />
+                    <DateTimePicker value={dueDate || new Date()} mode="date" display="default" onChange={(event, selectedDate) => {
+                      setShowDatePicker(false);
+                      if (selectedDate) setDueDate(selectedDate);
+                    }} />
                   )}
                 </View>
               )}
@@ -211,11 +369,7 @@ export default function App() {
             <View style={styles.fieldRow}>
               <Text style={styles.fieldLabel}>Concluída:</Text>
               <View style={styles.checkboxContainer}>
-                <Checkbox
-                  value={completed}
-                  onValueChange={setCompleted}
-                  color={completed ? '#000' : undefined}
-                />
+                <Checkbox value={completed} onValueChange={setCompleted} color={completed ? '#000' : undefined} />
               </View>
             </View>
 
@@ -223,14 +377,14 @@ export default function App() {
               <Text style={styles.fieldLabel}>Prioridade:</Text>
               <View style={styles.priorityContainer}>
                 {['Baixa', 'Média', 'Alta'].map((p) => (
-                  <TouchableOpacity 
-                    key={p} 
+                  <TouchableOpacity
+                    key={p}
                     style={[
-                      styles.priorityButton, 
-                      priority === p && { 
+                      styles.priorityButton,
+                      priority === p && {
                         backgroundColor: p === 'Baixa' ? '#4caf50' : p === 'Média' ? '#ff9800' : '#f44336',
-                        borderColor: p === 'Baixa' ? '#4caf50' : p === 'Média' ? '#ff9800' : '#f44336'
-                      }
+                        borderColor: p === 'Baixa' ? '#4caf50' : p === 'Média' ? '#ff9800' : '#f44336',
+                      },
                     ]}
                     onPress={() => setPriority(p as any)}
                   >
@@ -244,8 +398,8 @@ export default function App() {
               <TouchableOpacity style={styles.modalCancelBtn} onPress={resetForm}>
                 <Text style={styles.modalCancelText}>Cancelar</Text>
               </TouchableOpacity>
-              <TouchableOpacity 
-                style={[styles.modalSaveBtn, !text.trim() && styles.modalSaveBtnDisabled]} 
+              <TouchableOpacity
+                style={[styles.modalSaveBtn, !text.trim() && styles.modalSaveBtnDisabled]}
                 onPress={handleSave}
                 disabled={!text.trim()}
               >
@@ -256,11 +410,7 @@ export default function App() {
         </View>
       </Modal>
 
-      <Modal
-        visible={aboutModalVisible}
-        animationType="slide"
-        onRequestClose={() => setAboutModalVisible(false)}
-      >
+      <Modal visible={aboutModalVisible} animationType="slide" onRequestClose={() => setAboutModalVisible(false)}>
         <AboutScreen onClose={() => setAboutModalVisible(false)} />
       </Modal>
 
@@ -282,6 +432,16 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
     paddingHorizontal: 16,
   },
+  centeredContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 16,
+    color: '#555',
+  },
   headerContainer: {
     alignItems: 'center',
     marginTop: 16,
@@ -294,6 +454,30 @@ const styles = StyleSheet.create({
   header: {
     textAlign: 'center',
     fontSize: 24,
+    fontWeight: 'bold',
+  },
+  sessionContainer: {
+    marginTop: 16,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 16,
+  },
+  welcomeText: {
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  sessionSubtitle: {
+    color: '#666',
+  },
+  logoutButton: {
+    backgroundColor: '#ff4d4d',
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+  },
+  logoutText: {
+    color: '#fff',
     fontWeight: 'bold',
   },
   counterContainer: {
@@ -420,12 +604,11 @@ const styles = StyleSheet.create({
   },
   modalInput: {
     borderWidth: 1,
-    borderColor: '#ccc',
-    borderRadius: 4,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    fontSize: 16,
+    borderColor: '#ddd',
+    borderRadius: 10,
+    padding: 14,
     marginBottom: 16,
+    fontSize: 16,
   },
   fieldRow: {
     flexDirection: 'row',
@@ -433,67 +616,65 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   fieldLabel: {
-    fontSize: 16,
     fontWeight: 'bold',
   },
   checkboxContainer: {
     marginLeft: 16,
   },
+  datePickerBtn: {
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 10,
+    padding: 10,
+    width: '100%',
+    alignItems: 'center',
+  },
   priorityContainer: {
     flexDirection: 'row',
-    flex: 1,
-    marginLeft: 16,
     gap: 8,
-    flexWrap: 'wrap',
+    marginLeft: 16,
   },
   priorityButton: {
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    borderRadius: 4,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 10,
     borderWidth: 1,
     borderColor: '#ccc',
   },
   priorityText: {
     color: '#333',
+    fontWeight: 'bold',
   },
   priorityTextActive: {
     color: '#fff',
-    fontWeight: 'bold',
-  },
-  datePickerBtn: {
-    borderWidth: 1,
-    borderColor: '#ccc',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 4,
   },
   modalActions: {
     flexDirection: 'row',
-    justifyContent: 'flex-end',
-    gap: 12,
-    marginTop: 8,
+    justifyContent: 'space-between',
+    marginTop: 24,
   },
   modalCancelBtn: {
-    paddingVertical: 10,
-    paddingHorizontal: 16,
+    borderWidth: 1,
+    borderColor: '#999',
+    borderRadius: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
   },
   modalCancelText: {
-    color: '#666',
-    fontSize: 16,
+    color: '#333',
     fontWeight: 'bold',
   },
   modalSaveBtn: {
     backgroundColor: '#000',
-    paddingVertical: 10,
+    borderRadius: 10,
+    paddingVertical: 12,
     paddingHorizontal: 20,
-    borderRadius: 4,
   },
   modalSaveBtnDisabled: {
-    backgroundColor: '#ccc',
+    backgroundColor: '#999',
   },
   modalSaveText: {
     color: '#fff',
-    fontSize: 16,
     fontWeight: 'bold',
   },
 });
