@@ -16,9 +16,12 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { StatusBar } from 'expo-status-bar';
+import { Input as GInput, Button as GButton, ButtonText as GButtonText, AlertDialog as GAlertDialog, Text as GText, Heading } from '@gluestack-ui/react';
+import { Alert } from 'react-native';
 import Checkbox from 'expo-checkbox';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import TaskList from './src/components/TaskList';
+import EmptyState from './src/components/EmptyState';
 import LoginScreen from './src/components/LoginScreen';
 import SignupScreen from './src/components/SignupScreen';
 import {
@@ -114,6 +117,13 @@ export default function App() {
     } else {
       addTask(text, completed, formattedDate, setTasks, resetForm);
     }
+  };
+
+  const confirmDelete = (id: string) => {
+    Alert.alert('Confirmar', 'Tem certeza que deseja excluir esta tarefa?', [
+      { text: 'Cancelar', style: 'cancel' },
+      { text: 'Excluir', style: 'destructive', onPress: () => deleteTask(id, setTasks) },
+    ]);
   };
 
   const handleLogout = async () => {
@@ -225,8 +235,8 @@ export default function App() {
   }
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <View style={styles.container}>
+    <SafeAreaView className="flex-1 bg-gray-100" style={Platform.OS === 'android' ? { paddingTop: RNStatusBar.currentHeight } : undefined}>
+      <View className="flex-1 max-w-[600px] w-full self-center px-4">
         <View style={styles.headerContainer}>
           {logoError ? (
             <Text style={styles.header}>Gerenciador de Tarefas</Text>
@@ -276,42 +286,35 @@ export default function App() {
         </View>
 
         <View style={styles.actionButtonsContainer}>
-          <Pressable
-            style={({ pressed }) => [
-              styles.actionButton,
-              styles.actionButtonAdd,
-              pressed && styles.actionButtonAddPressed,
-            ]}
-            onPress={() => setModalVisible(true)}
-          >
-            <Text style={styles.actionButtonText}>Nova Tarefa</Text>
-          </Pressable>
+          <GButton onPress={() => setModalVisible(true)} className="flex-1 mr-2">
+            <GButtonText>Nova Tarefa</GButtonText>
+          </GButton>
 
-          <Pressable
-            style={({ pressed }) => [
-              styles.actionButton,
-              styles.deleteButton,
-              pressed && styles.deleteButtonPressed,
-            ]}
-            onPress={() => setTasks([])}
-          >
-            <Text style={styles.actionButtonText}>Excluir todas</Text>
-          </Pressable>
+          <GButton onPress={() => setTasks([])} className="flex-1 ml-2" colorScheme="danger">
+            <GButtonText>Excluir todas</GButtonText>
+          </GButton>
         </View>
 
         <View style={styles.aboutButtonContainer}>
           <Button title="Sobre o App" onPress={() => setAboutModalVisible(true)} />
         </View>
 
-        <TaskList
-          tasks={tasks.filter((t) => {
+        {(() => {
+          const filtered = tasks.filter((t) => {
             if (filter === 'completed') return t.completed;
             if (filter === 'pending') return !t.completed;
             return true;
-          })}
-          onUpdate={updateMode}
-          onDelete={(id) => deleteTask(id, setTasks)}
-        />
+          });
+          return filtered.length === 0 ? (
+            <EmptyState />
+          ) : (
+            <TaskList
+              tasks={filtered}
+              onUpdate={updateMode}
+              onDelete={confirmDelete}
+            />
+          );
+        })()}
 
         {taskLoading && (
           <View style={styles.loaderContainer}>
@@ -325,8 +328,7 @@ export default function App() {
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>{isUpdating ? 'Editar Tarefa' : 'Nova Tarefa'}</Text>
 
-            <TextInput
-              style={styles.modalInput}
+            <GInput
               placeholder="Nome da tarefa..."
               value={text}
               maxLength={50}
